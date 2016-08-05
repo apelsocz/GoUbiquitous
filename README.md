@@ -1,6 +1,19 @@
-Advanced Android Sample App
+### Android Developer Nanodegree
+# Go Ubiquitous
+## Project Overview
+In this project students build a wearable watch face for the Sunshine app to run on an Android Wear device.
+
+## Why this Project?
+Android Wear is a way to integrate any app directly into users' lives. This project teaches how to perform that integration.
+
+## Learning Outcomes
+- Understand the fundamentals of Android Wear
+- Design for multiple watch form factors
+- Communicate between a mobile device and a wearable device
+
+###Advanced Android Sample App
 ===================================
-License
+###License
 -------
 Copyright 2015 The Android Open Source Project, Inc.
 
