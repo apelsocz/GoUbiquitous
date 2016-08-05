@@ -11,10 +11,11 @@ Android Wear is a way to integrate any app directly into users' lives. This proj
 - Design for multiple watch form factors
 - Communicate between a mobile device and a wearable device
 
-###Advanced Android Sample App
-===================================
-###License
 -------
+Advanced Android Sample App
+
+License
+
 Copyright 2015 The Android Open Source Project, Inc.
 
 Licensed to the Apache Software Foundation (ASF) under one or more contributor
