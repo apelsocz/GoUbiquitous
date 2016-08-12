@@ -31,11 +31,15 @@ import android.os.Handler;
 import android.os.Message;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
-import android.text.format.Time;
+import android.text.format.DateFormat;
 import android.view.SurfaceHolder;
 import android.view.WindowInsets;
 
 import java.lang.ref.WeakReference;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.Locale;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
@@ -44,6 +48,8 @@ import java.util.concurrent.TimeUnit;
  * low-bit ambient mode, the text is drawn without anti-aliasing in ambient mode.
  */
 public class SunshineWatchFace extends CanvasWatchFaceService {
+    private static final Typeface BOLD_TYPEFACE =
+            Typeface.create(Typeface.MONOSPACE, Typeface.BOLD);
     private static final Typeface NORMAL_TYPEFACE =
             Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL);
 
@@ -87,20 +93,23 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
         Paint mBackgroundPaint;
-        Paint mTextPaint;
+        Paint mTimePaint;
+        Paint mDatePaint;
         boolean mAmbient;
-        Time mTime;
+        Calendar mCalendar;
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                mTime.clear(intent.getStringExtra("time-zone"));
-                mTime.setToNow();
+                mCalendar.setTimeInMillis(System.currentTimeMillis());
+                mCalendar.setTimeZone(TimeZone.getDefault());
             }
         };
         int mTapCount;
 
-        float mXOffset;
-        float mYOffset;
+        float mXOffsetTime;
+        float mYOffsetTime;
+        float mXOffsetDate;
+        float mYOffsetDate;
 
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
@@ -119,15 +128,19 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                     .setAcceptsTapEvents(true)
                     .build());
             Resources resources = SunshineWatchFace.this.getResources();
-            mYOffset = resources.getDimension(R.dimen.digital_y_offset);
+            mYOffsetTime = resources.getDimension(R.dimen.digital_y_offset_time);
+            mYOffsetDate = resources.getDimension(R.dimen.digital_y_offset_date);
 
             mBackgroundPaint = new Paint();
             mBackgroundPaint.setColor(resources.getColor(R.color.background));
 
-            mTextPaint = new Paint();
-            mTextPaint = createTextPaint(resources.getColor(R.color.digital_text));
+            mTimePaint = new Paint();
+            mTimePaint = createTimePaint(resources.getColor(R.color.digital_text_time));
 
-            mTime = new Time();
+            mDatePaint = new Paint();
+            mDatePaint = createDatePaint(resources.getColor(R.color.digital_text_date));
+
+            mCalendar = Calendar.getInstance();
         }
 
         @Override
@@ -136,7 +149,15 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             super.onDestroy();
         }
 
-        private Paint createTextPaint(int textColor) {
+        private Paint createTimePaint(int textColor) {
+            Paint paint = new Paint();
+            paint.setColor(textColor);
+            paint.setTypeface(BOLD_TYPEFACE);
+            paint.setAntiAlias(true);
+            return paint;
+        }
+
+        private Paint createDatePaint(int textColor) {
             Paint paint = new Paint();
             paint.setColor(textColor);
             paint.setTypeface(NORMAL_TYPEFACE);
@@ -152,8 +173,8 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 registerReceiver();
 
                 // Update time zone in case it changed while we weren't visible.
-                mTime.clear(TimeZone.getDefault().getID());
-                mTime.setToNow();
+                mCalendar.setTimeInMillis(System.currentTimeMillis());
+                mCalendar.setTimeZone(TimeZone.getDefault());
             } else {
                 unregisterReceiver();
             }
@@ -187,12 +208,17 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             // Load resources that have alternate values for round watches.
             Resources resources = SunshineWatchFace.this.getResources();
             boolean isRound = insets.isRound();
-            mXOffset = resources.getDimension(isRound
-                    ? R.dimen.digital_x_offset_round : R.dimen.digital_x_offset);
-            float textSize = resources.getDimension(isRound
-                    ? R.dimen.digital_text_size_round : R.dimen.digital_text_size);
+            mXOffsetTime = resources.getDimension(isRound
+                    ? R.dimen.digital_x_offset_time_round : R.dimen.digital_x_offset_time);
+            mXOffsetDate = resources.getDimension(isRound
+                    ? R.dimen.digital_x_offset_date_round : R.dimen.digital_x_offset_date);
+            float timeTextSize = resources.getDimension(isRound
+                    ? R.dimen.digital_text_size_time_round : R.dimen.digital_text_size_time);
+            float dateTextSize = resources.getDimension(isRound
+                    ? R.dimen.digital_text_size_date_round : R.dimen.digital_text_size_date);
 
-            mTextPaint.setTextSize(textSize);
+            mTimePaint.setTextSize(timeTextSize);
+            mDatePaint.setTextSize(dateTextSize);
         }
 
         @Override
@@ -213,7 +239,8 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             if (mAmbient != inAmbientMode) {
                 mAmbient = inAmbientMode;
                 if (mLowBitAmbient) {
-                    mTextPaint.setAntiAlias(!inAmbientMode);
+                    mTimePaint.setAntiAlias(!inAmbientMode);
+                    mDatePaint.setAntiAlias(!inAmbientMode);
                 }
                 invalidate();
             }
@@ -257,11 +284,14 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             }
 
             // Draw H:MM in ambient mode or H:MM:SS in interactive mode.
-            mTime.setToNow();
-            String text = mAmbient
-                    ? String.format("%d:%02d", mTime.hour, mTime.minute)
-                    : String.format("%d:%02d:%02d", mTime.hour, mTime.minute, mTime.second);
-            canvas.drawText(text, mXOffset, mYOffset, mTextPaint);
+            mCalendar.setTimeInMillis(System.currentTimeMillis());
+            Date date = mCalendar.getTime();
+            SimpleDateFormat timeFormat = new SimpleDateFormat(
+                    DateFormat.is24HourFormat(getApplicationContext()) ? "HH:mm" : "hh:mm",
+                    Locale.getDefault());
+            SimpleDateFormat dateFormat = new SimpleDateFormat("EEE, MMM d yy", Locale.getDefault());
+            canvas.drawText(timeFormat.format(date), mXOffsetTime, mYOffsetTime, mTimePaint);
+            canvas.drawText(dateFormat.format(date), mXOffsetDate, mYOffsetDate, mDatePaint);
         }
 
         /**
