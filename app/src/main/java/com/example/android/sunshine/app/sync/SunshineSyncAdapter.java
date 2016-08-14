@@ -36,6 +36,12 @@ import com.example.android.sunshine.app.R;
 import com.example.android.sunshine.app.Utility;
 import com.example.android.sunshine.app.data.WeatherContract;
 import com.example.android.sunshine.app.muzei.WeatherMuzeiSource;
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.wearable.MessageApi;
+import com.google.android.gms.wearable.Node;
+import com.google.android.gms.wearable.NodeApi;
+import com.google.android.gms.wearable.Wearable;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -370,6 +376,9 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
                 updateMuzei();
                 notifyWeather();
             }
+
+            notifyWear();
+
             Log.d(LOG_TAG, "Sync Complete. " + cVVector.size() + " Inserted");
             setLocationStatus(getContext(), LOCATION_STATUS_OK);
 
@@ -503,6 +512,73 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
                 cursor.close();
             }
         }
+    }
+
+    private void notifyWear() {
+        final String metricUnitsIndicator = "C";
+        final String imperialUnitsIndicator = "F";
+
+        Context context = getContext();
+
+        String locationQuery = Utility.getPreferredLocation(context);
+        Uri weatherUri = WeatherContract.WeatherEntry.buildWeatherLocationWithDate(locationQuery, System.currentTimeMillis());
+        Cursor cursor = context.getContentResolver().query(weatherUri, NOTIFY_WEATHER_PROJECTION, null, null, null);
+        String contentText = "";
+
+        if (cursor.moveToFirst()) {
+            int weatherId = cursor.getInt(INDEX_WEATHER_ID);
+            double high = cursor.getDouble(INDEX_MAX_TEMP);
+            double low = cursor.getDouble(INDEX_MIN_TEMP);
+
+            // we send a message with 4 parts
+            contentText = String.format(context.getString(R.string.format_wear_message),
+                    Integer.toString(weatherId),
+                    Double.toString(high),
+                    Double.toString(low),
+                    Utility.isMetric(context)? metricUnitsIndicator : imperialUnitsIndicator);
+
+        }
+        cursor.close();
+
+        sendMsgToWear( "/weather_update", contentText );
+    }
+
+    private void sendMsgToWear( final String path, final String text ) {
+        // we communicate to wearables with this client
+        final GoogleApiClient apiClient = new GoogleApiClient.Builder(getContext())
+                .addConnectionCallbacks(new GoogleApiClient.ConnectionCallbacks() {
+
+                    @Override
+                    public void onConnected(Bundle bundle) {
+                    }
+
+                    @Override
+                    public void onConnectionSuspended(int i) {
+                    }
+                }).addOnConnectionFailedListener(new GoogleApiClient.OnConnectionFailedListener() {
+
+                    @Override
+                    public void onConnectionFailed(ConnectionResult connectionResult) {
+                    }
+                }).addApi(Wearable.API).build();
+
+        // start the client
+        apiClient.connect();
+
+        // send the message to connected wearables
+        // this must be done on a background thread because the call to wait for connected nodes blocks
+        new Thread( new Runnable() {
+            @Override
+            public void run() {
+                NodeApi.GetConnectedNodesResult nodes =
+                        Wearable.NodeApi.getConnectedNodes(apiClient).await();
+                for (Node node : nodes.getNodes()) {
+                    MessageApi.SendMessageResult result = Wearable.MessageApi.sendMessage(
+                            apiClient, node.getId(), path, text.getBytes()).await();
+                }
+                apiClient.disconnect();
+            }
+        }).start();
     }
 
     /**
