@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.pelsoczi.wearable;
+package com.example.android.sunshine.app;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -83,7 +83,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
     }
 
     private static class EngineHandler extends Handler {
-        private final WeakReference<SunshineWatchFace.Engine> mWeakReference;
+        private final WeakReference<Engine> mWeakReference;
 
         public EngineHandler(SunshineWatchFace.Engine reference) {
             mWeakReference = new WeakReference<>(reference);
@@ -165,9 +165,9 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                         String msgPath = "/init";
                         PutDataMapRequest putDataMapReq = PutDataMapRequest.create(msgPath);
                         putDataMapReq.getDataMap().putString("INIT", new Date().toString());
-                        PutDataRequest putDataReq = putDataMapReq.asPutDataRequest();
-                        Wearable.DataApi.putDataItem(mAPiClient, putDataReq);
-                        Log.i("new Runnable", node.toString());
+                        PutDataRequest putDataReq = putDataMapReq.asPutDataRequest().setUrgent();
+                        Wearable.DataApi.putDataItem(mAPiClient, putDataReq.setUrgent());
+                        Log.i("LOG", node.toString());
                     }
                     Log.i("OnCreate", "end");
                 }
