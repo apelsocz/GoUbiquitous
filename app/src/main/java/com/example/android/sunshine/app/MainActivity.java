@@ -20,6 +20,8 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.ActivityOptionsCompat;
 import android.support.v4.util.Pair;
@@ -35,16 +37,29 @@ import com.example.android.sunshine.app.gcm.RegistrationIntentService;
 import com.example.android.sunshine.app.sync.SunshineSyncAdapter;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.DataEvent;
+import com.google.android.gms.wearable.DataEventBuffer;
+import com.google.android.gms.wearable.DataItem;
+import com.google.android.gms.wearable.Wearable;
 
-public class MainActivity extends AppCompatActivity implements ForecastFragment.Callback {
+public class MainActivity extends AppCompatActivity implements ForecastFragment.Callback,
+        DataApi.DataListener, GoogleApiClient.ConnectionCallbacks,
+        GoogleApiClient.OnConnectionFailedListener {
 
     private final String LOG_TAG = MainActivity.class.getSimpleName();
+
     private static final String DETAILFRAGMENT_TAG = "DFTAG";
     private final static int PLAY_SERVICES_RESOLUTION_REQUEST = 9000;
     public static final String SENT_TOKEN_TO_SERVER = "sentTokenToServer";
 
+    private static final String WEATHER_PATH = "/weather";
+
     private boolean mTwoPane;
     private String mLocation;
+
+    private GoogleApiClient mGoogleApiClient;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -107,6 +122,12 @@ public class MainActivity extends AppCompatActivity implements ForecastFragment.
                 startService(intent);
             }
         }
+
+        mGoogleApiClient = new GoogleApiClient.Builder(this)
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                .addApi(Wearable.API)
+                .build();
     }
 
     @Override
@@ -147,6 +168,17 @@ public class MainActivity extends AppCompatActivity implements ForecastFragment.
                 df.onLocationChanged(location);
             }
             mLocation = location;
+        }
+
+        mGoogleApiClient.connect();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
+            Wearable.DataApi.removeListener(mGoogleApiClient, this);
+            mGoogleApiClient.disconnect();
         }
     }
 
@@ -195,5 +227,33 @@ public class MainActivity extends AppCompatActivity implements ForecastFragment.
             return false;
         }
         return true;
+    }
+
+    @Override
+    public void onConnected(@Nullable Bundle bundle) {
+        Wearable.DataApi.addListener(mGoogleApiClient, this);
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+
+    }
+
+    @Override
+    public void onDataChanged(DataEventBuffer dataEventBuffer) {
+        Log.i("MAIN ACTIVITY", "onDataChanged");
+        for (DataEvent event : dataEventBuffer) {
+            if (event.getType() == DataEvent.TYPE_CHANGED) {
+                DataItem item = event.getDataItem();
+                if (item.getUri().getPath().compareTo(WEATHER_PATH) == 0) {
+                    SunshineSyncAdapter.syncImmediately(this);
+                }
+            }
+        }
+    }
+
+    @Override
+    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+
     }
 }

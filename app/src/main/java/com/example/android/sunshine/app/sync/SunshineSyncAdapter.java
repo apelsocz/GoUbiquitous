@@ -36,11 +36,11 @@ import com.example.android.sunshine.app.R;
 import com.example.android.sunshine.app.Utility;
 import com.example.android.sunshine.app.data.WeatherContract;
 import com.example.android.sunshine.app.muzei.WeatherMuzeiSource;
-import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.wearable.MessageApi;
-import com.google.android.gms.wearable.Node;
-import com.google.android.gms.wearable.NodeApi;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.PutDataMapRequest;
+import com.google.android.gms.wearable.PutDataRequest;
 import com.google.android.gms.wearable.Wearable;
 
 import org.json.JSONArray;
@@ -55,6 +55,7 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.UUID;
 import java.util.Vector;
 import java.util.concurrent.ExecutionException;
 
@@ -68,7 +69,6 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
     public static final int SYNC_FLEXTIME = SYNC_INTERVAL/3;
     private static final long DAY_IN_MILLIS = 1000 * 60 * 60 * 24;
     private static final int WEATHER_NOTIFICATION_ID = 3004;
-
 
     private static final String[] NOTIFY_WEATHER_PROJECTION = new String[] {
             WeatherContract.WeatherEntry.COLUMN_WEATHER_ID,
@@ -84,7 +84,8 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
     private static final int INDEX_SHORT_DESC = 3;
 
     @Retention(RetentionPolicy.SOURCE)
-    @IntDef({LOCATION_STATUS_OK, LOCATION_STATUS_SERVER_DOWN, LOCATION_STATUS_SERVER_INVALID,  LOCATION_STATUS_UNKNOWN, LOCATION_STATUS_INVALID})
+    @IntDef({LOCATION_STATUS_OK, LOCATION_STATUS_SERVER_DOWN, LOCATION_STATUS_SERVER_INVALID,
+            LOCATION_STATUS_UNKNOWN, LOCATION_STATUS_INVALID})
     public @interface LocationStatus {}
 
     public static final int LOCATION_STATUS_OK = 0;
@@ -93,8 +94,22 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
     public static final int LOCATION_STATUS_UNKNOWN = 3;
     public static final int LOCATION_STATUS_INVALID = 4;
 
+    private static final String WEATHER_INFO_PATH = "/weather-info";
+    private static final String KEY_UUID = "uuid";
+    private static final String KEY_HIGH = "high";
+    private static final String KEY_LOW = "low";
+    private static final String KEY_WEATHER_ID = "weatherId";
+
+    private GoogleApiClient mGoogleApiClient;
+
     public SunshineSyncAdapter(Context context, boolean autoInitialize) {
         super(context, autoInitialize);
+
+        if (mGoogleApiClient == null) {
+            mGoogleApiClient = new GoogleApiClient.Builder(context)
+                    .addApi(Wearable.API)
+                    .build();
+        }
     }
 
     @Override
@@ -358,6 +373,13 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
                 weatherValues.put(WeatherContract.WeatherEntry.COLUMN_WEATHER_ID, weatherId);
 
                 cVVector.add(weatherValues);
+
+                if ( cVVector.size() > 0 ) {
+                    // only send the weather for today
+                    if (i == 0) {
+                        notifyWear(high, low, weatherId);
+                    }
+                }
             }
 
             int inserted = 0;
@@ -376,8 +398,6 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
                 updateMuzei();
                 notifyWeather();
             }
-
-            notifyWear();
 
             Log.d(LOG_TAG, "Sync Complete. " + cVVector.size() + " Inserted");
             setLocationStatus(getContext(), LOCATION_STATUS_OK);
@@ -514,71 +534,36 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
         }
     }
 
-    private void notifyWear() {
-        final String metricUnitsIndicator = "C";
-        final String imperialUnitsIndicator = "F";
+    private void notifyWear(double high, double low, int weatherId) {
 
-        Context context = getContext();
+        Log.d(LOG_TAG, "Sending Weather data");
 
-        String locationQuery = Utility.getPreferredLocation(context);
-        Uri weatherUri = WeatherContract.WeatherEntry.buildWeatherLocationWithDate(locationQuery, System.currentTimeMillis());
-        Cursor cursor = context.getContentResolver().query(weatherUri, NOTIFY_WEATHER_PROJECTION, null, null, null);
-        String contentText = "";
-
-        if (cursor.moveToFirst()) {
-            int weatherId = cursor.getInt(INDEX_WEATHER_ID);
-            double high = cursor.getDouble(INDEX_MAX_TEMP);
-            double low = cursor.getDouble(INDEX_MIN_TEMP);
-
-            // we send a message with 4 parts
-            contentText = String.format(context.getString(R.string.format_wear_message),
-                    Integer.toString(weatherId),
-                    Double.toString(high),
-                    Double.toString(low),
-                    Utility.isMetric(context)? metricUnitsIndicator : imperialUnitsIndicator);
-
+        if (mGoogleApiClient == null) {
+            return;
         }
-        cursor.close();
 
-        sendMsgToWear( "/weather_update", contentText );
-    }
+        mGoogleApiClient.connect();
 
-    private void sendMsgToWear( final String path, final String text ) {
-        // we communicate to wearables with this client
-        final GoogleApiClient apiClient = new GoogleApiClient.Builder(getContext())
-                .addConnectionCallbacks(new GoogleApiClient.ConnectionCallbacks() {
+        PutDataMapRequest putDataMapRequest = PutDataMapRequest.create(WEATHER_INFO_PATH);
+        putDataMapRequest.getDataMap().putString(KEY_UUID, UUID.randomUUID().toString());
+        putDataMapRequest.getDataMap().putString(KEY_HIGH, Utility.formatTemperature(getContext(), high));
+        putDataMapRequest.getDataMap().putString(KEY_LOW, Utility.formatTemperature(getContext(), low));
+        putDataMapRequest.getDataMap().putInt(KEY_WEATHER_ID, weatherId);
+        PutDataRequest request = putDataMapRequest.asPutDataRequest().setUrgent();
 
+        Log.d(LOG_TAG, "High:" + high + ", Low:" + low + ", Condition ID: " + weatherId);
+
+        Wearable.DataApi.putDataItem(mGoogleApiClient, request)
+                .setResultCallback(new ResultCallback<DataApi.DataItemResult>() {
                     @Override
-                    public void onConnected(Bundle bundle) {
+                    public void onResult(DataApi.DataItemResult dataItemResult) {
+                        if (!dataItemResult.getStatus().isSuccess()) {
+                            Log.d(LOG_TAG, "Failed to send weather data");
+                        } else {
+                            Log.d(LOG_TAG, "Successfully sent weather data");
+                        }
                     }
-
-                    @Override
-                    public void onConnectionSuspended(int i) {
-                    }
-                }).addOnConnectionFailedListener(new GoogleApiClient.OnConnectionFailedListener() {
-
-                    @Override
-                    public void onConnectionFailed(ConnectionResult connectionResult) {
-                    }
-                }).addApi(Wearable.API).build();
-
-        // start the client
-        apiClient.connect();
-
-        // send the message to connected wearables
-        // this must be done on a background thread because the call to wait for connected nodes blocks
-        new Thread( new Runnable() {
-            @Override
-            public void run() {
-                NodeApi.GetConnectedNodesResult nodes =
-                        Wearable.NodeApi.getConnectedNodes(apiClient).await();
-                for (Node node : nodes.getNodes()) {
-                    MessageApi.SendMessageResult result = Wearable.MessageApi.sendMessage(
-                            apiClient, node.getId(), path, text.getBytes()).await();
-                }
-                apiClient.disconnect();
-            }
-        }).start();
+                });
     }
 
     /**

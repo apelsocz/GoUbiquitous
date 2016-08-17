@@ -40,10 +40,12 @@ import android.view.WindowInsets;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.wearable.MessageApi;
-import com.google.android.gms.wearable.MessageEvent;
-import com.google.android.gms.wearable.Node;
-import com.google.android.gms.wearable.NodeApi;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.DataEvent;
+import com.google.android.gms.wearable.DataEventBuffer;
+import com.google.android.gms.wearable.DataMap;
+import com.google.android.gms.wearable.DataMapItem;
 import com.google.android.gms.wearable.PutDataMapRequest;
 import com.google.android.gms.wearable.PutDataRequest;
 import com.google.android.gms.wearable.Wearable;
@@ -54,6 +56,7 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -61,6 +64,9 @@ import java.util.concurrent.TimeUnit;
  * low-bit ambient mode, the text is drawn without anti-aliasing in ambient mode.
  */
 public class SunshineWatchFace extends CanvasWatchFaceService {
+
+    private static final String LOG_TAG = SunshineWatchFace.class.getSimpleName();
+
     private static final Typeface BOLD_TYPEFACE =
             Typeface.create(Typeface.MONOSPACE, Typeface.BOLD);
     private static final Typeface NORMAL_TYPEFACE =
@@ -102,8 +108,16 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         }
     }
 
-    private class Engine extends CanvasWatchFaceService.Engine implements MessageApi.MessageListener,
+    private class Engine extends CanvasWatchFaceService.Engine implements DataApi.DataListener,
             GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
+
+        private static final String WEATHER_PATH = "/weather";
+        private static final String WEATHER_INFO_PATH = "/weather-info";
+
+        private static final String KEY_UUID = "uuid";
+        private static final String KEY_HIGH = "high";
+        private static final String KEY_LOW = "low";
+        private static final String KEY_WEATHER_ID = "weatherId";
 
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         Paint mBackgroundPaint;
@@ -155,24 +169,6 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                     .setAcceptsTapEvents(true)
                     .build());
 
-            new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    Log.i("OnCreate", "new Thread, new Runnable");
-                    NodeApi.GetConnectedNodesResult nodes =
-                            Wearable.NodeApi.getConnectedNodes(mAPiClient).await();
-                    for (Node node : nodes.getNodes()) {
-                        String msgPath = "/init";
-                        PutDataMapRequest putDataMapReq = PutDataMapRequest.create(msgPath);
-                        putDataMapReq.getDataMap().putString("INIT", new Date().toString());
-                        PutDataRequest putDataReq = putDataMapReq.asPutDataRequest().setUrgent();
-                        Wearable.DataApi.putDataItem(mAPiClient, putDataReq.setUrgent());
-                        Log.i("LOG", node.toString());
-                    }
-                    Log.i("OnCreate", "end");
-                }
-            }).start();
-
             Resources resources = SunshineWatchFace.this.getResources();
             mYOffsetTime = resources.getDimension(R.dimen.digital_y_offset_time);
             mYOffsetDate = resources.getDimension(R.dimen.digital_y_offset_date);
@@ -195,27 +191,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             mCalendar = Calendar.getInstance();
         }
 
-        @Override
-        public void onConnected(@Nullable Bundle bundle) {
-            Log.i("onConnected", "onConnected");
-            Wearable.MessageApi.addListener(mAPiClient, this);
-        }
 
-        @Override
-        public void onConnectionSuspended(int i) {
-            Log.i("onConnectionSuspended", "onConnectionSuspended");
-        }
-
-        @Override
-        public void onMessageReceived(MessageEvent messageEvent) {
-            Log.i("onMessageReceived", messageEvent.toString());
-            Log.i("onMessageReceived", new String(messageEvent.getData()));
-        }
-
-        @Override
-        public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
-            Log.i("onConnectionFailed", "onConnectionFailed");
-        }
 
         @Override
         public void onDestroy() {
@@ -287,7 +263,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
         private void releaseGoogleApiClient() {
             if (mAPiClient != null && mAPiClient.isConnected()) {
-                Wearable.MessageApi.removeListener(mAPiClient, this);
+                Wearable.DataApi.removeListener(mAPiClient, this);
                 mAPiClient.disconnect();
             }
         }
@@ -422,6 +398,75 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             }
         }
 
+        @Override
+        public void onConnected(@Nullable Bundle bundle) {
+            Log.i("onConnected", "onConnected");
+            Wearable.DataApi.addListener(mAPiClient, this);
+            getWeatherData();
+        }
 
+        /**
+         * Requests the weather data from the app's {@code MainActivity}
+         */
+        public void getWeatherData() {
+            PutDataMapRequest putDataMapRequest = PutDataMapRequest.create(WEATHER_PATH);
+            putDataMapRequest.getDataMap().putString(KEY_UUID, UUID.randomUUID().toString());
+            PutDataRequest request = putDataMapRequest.asPutDataRequest()
+                    .setUrgent();
+
+            Wearable.DataApi.putDataItem(mAPiClient, request)
+                    .setResultCallback(new ResultCallback<DataApi.DataItemResult>() {
+                        @Override
+                        public void onResult(DataApi.DataItemResult dataItemResult) {
+                            if (!dataItemResult.getStatus().isSuccess()) {
+                                Log.d(LOG_TAG, "Failed asking phone for weather data");
+
+                            } else {
+                                Log.d(LOG_TAG, "Successfully asked for weather data");
+                            }
+                        }
+                    });
+        }
+
+        @Override
+        public void onConnectionSuspended(int i) {
+            Log.i("onConnectionSuspended", "onConnectionSuspended");
+        }
+
+        private static final String TAG = "TAG";
+
+        @Override
+        public void onDataChanged(DataEventBuffer dataEventBuffer) {
+            Log.i("onDataChanged", dataEventBuffer.toString());
+            for (DataEvent dataEvent : dataEventBuffer) {
+                if (dataEvent.getType() == DataEvent.TYPE_CHANGED) {
+                    DataMap dataMap = DataMapItem.fromDataItem(dataEvent.getDataItem()).getDataMap();
+                    String path = dataEvent.getDataItem().getUri().getPath();
+
+                    if (path.equals(WEATHER_INFO_PATH)) {
+                        if (dataMap.containsKey(KEY_HIGH)) {
+                            Log.d(TAG, "High = " + dataMap.getString(KEY_HIGH));
+                        }
+                        else {
+                            Log.d(TAG, "What? No high?");
+                        }
+
+                        if (dataMap.containsKey(KEY_LOW)) {
+                            Log.d(TAG, "Low = " + dataMap.getString(KEY_LOW));
+                        }
+                        else {
+                            Log.d(TAG, "What? No low?");
+                        }
+
+                        invalidate();
+                    }
+                }
+            }
+        }
+
+        @Override
+        public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+            Log.i("onConnectionFailed", "onConnectionFailed");
+        }
     }
 }
