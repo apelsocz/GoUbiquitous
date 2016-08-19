@@ -536,8 +536,6 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
 
     private void notifyWear(double high, double low, int weatherId) {
 
-        Log.d(LOG_TAG, "Sending Weather data");
-
         if (mGoogleApiClient == null) {
             return;
         }

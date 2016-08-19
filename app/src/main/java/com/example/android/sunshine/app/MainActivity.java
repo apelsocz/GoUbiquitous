@@ -241,7 +241,6 @@ public class MainActivity extends AppCompatActivity implements ForecastFragment.
 
     @Override
     public void onDataChanged(DataEventBuffer dataEventBuffer) {
-        Log.i("MAIN ACTIVITY", "onDataChanged");
         for (DataEvent event : dataEventBuffer) {
             if (event.getType() == DataEvent.TYPE_CHANGED) {
                 DataItem item = event.getDataItem();
